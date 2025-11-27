@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Moss & Stone</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              concrete: '#E0E0E0',
+              'concrete-dark': '#C0C0C0',
+              moss: '#3A4D1F',        /* 加深了一点，更有质感 */
+              'moss-light': '#7B924A', /* 调亮，用于高光 */
+              ink: '#2C2C2C',
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              serif: ['"Noto Serif SC"', 'serif'],
+            },
+            animation: {
+              'grow-moss': 'grow 4s ease-in-out forwards',
+            },
+            keyframes: {
+              grow: {
+                '0%': { transform: 'scale(0)', opacity: '0' },
+                '100%': { transform: 'scale(1)', opacity: '1' },
+              }
+            }
+          },
+        },
+      }
+    </script>
+
+    <style>
+      body {
+        background-color: #E0E0E0;
+        color: #2C2C2C;
+        overflow-x: hidden;
+      }
+      
+      .noise-bg {
+        position: fixed;
+        top: 0; left: 0; width: 100vw; height: 100vh;
+        pointer-events: none; z-index: 50; opacity: 0.05;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+      }
+
+      .carved-deep {
+        color: rgba(44, 44, 44, 0.65) !important;
+        /* 蚀刻效果微调，增加一点点内部高光，模拟凹陷边缘的反光 */
+        text-shadow: 
+            0px 1px 0px rgba(255,255,255, 0.6), 
+            0px -1px 1px rgba(0,0,0, 0.2) !important;
+        transition: all 1s ease-out;
+      }
+
+      textarea:focus, input:focus {
+        outline: none !important;
+        box-shadow: none !important;
+        border: none !important;
+      }
+      
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { 
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+
+      .jagged-top {
+          background-image: 
+              linear-gradient(45deg, transparent 50%, #Fdfdfd 50%), 
+              linear-gradient(-45deg, transparent 50%, #Fdfdfd 50%);
+          background-position: bottom left;
+          background-size: 10px 10px;
+          background-repeat: repeat-x;
+      }
+
+      .jagged-bottom {
+          background-image: 
+              linear-gradient(135deg, transparent 50%, #Fdfdfd 50%), 
+              linear-gradient(-135deg, transparent 50%, #Fdfdfd 50%);
+          background-position: top left;
+          background-size: 10px 10px;
+          background-repeat: repeat-x;
+      }
+      
+      .drop-shadow-jagged {
+          filter: drop-shadow(4px 4px 10px rgba(0,0,0,0.15));
+      }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <div class="noise-bg"></div>
+    
+    <svg style="display: none;">
+        <defs>
+            <filter id="mossRoughness">
+                <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch" />
+                <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1.2 -0.2" />
+            </filter>
+            <filter id="mossFuzz">
+                <feTurbulence type="fractalNoise" baseFrequency="2.5" numOctaves="3" stitchTiles="stitch" />
+                <feContrast in="SourceGraphic" mode="linear" slope="2" />
+            </filter>
+        </defs>
+    </svg>
+
+    <script type="text/babel">
+        // ==========================================
+        // 0. 配置区域
+        // ==========================================
+        const INSIGHT_POOL = [
+            "风吹过，痕迹变淡，但石头记得。",
+            "有些重量，放下后才能看清形状。",
+            "青苔不急于生长，它只是覆盖。",
+            "如同雨水归于大海，情绪也终将平静。",
+            "静默是最大的回响。",
+            "此刻的粗糙，是未来圆润的开始。",
+            "不要慌张，月亮也经常失眠。",
+            "山谷没有回音，是因为它在倾听。"
+        ];
+
+        // ==========================================
+        // 1. 环境准备 & 工具函数
+        // ==========================================
+        const { motion, AnimatePresence } = window.Motion;
+        const { useState, useEffect, useCallback, useRef, useMemo } = React;
+
+        const Icons = {
+            Sun: ({size=24, className}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="5"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg>,
+            Cloud: ({size=24, className}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19"/><path d="M17.5 19h1a4.5 4.5 0 0 0 0-9h-1.257A6.478 6.478 0 0 0 5.5 10a6.5 6.5 0 0 0 6.5 6.5h.5"/></svg>,
+            CloudRain: ({size=24, className}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M16 13v8"/><path d="M8 13v8"/><path d="M12 15v8"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/></svg>,
+            CloudLightning: ({size=24, className}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M6 16.326A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.973"/><path d="m13 12-3 5h4l-3 5"/></svg>,
+            X: ({size=24, className}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
+        };
+
+        const ScreenState = {
+            COURTYARD: 'COURTYARD',
+            ETCHING: 'ETCHING',
+            OVERGROWTH: 'OVERGROWTH',
+            ECHO: 'ECHO'
+        };
+
+        const Weather = {
+            SUN: 'Sun',
+            CLOUD: 'Cloud',
+            RAIN: 'Rain',
+            STORM: 'Storm'
+        };
+
+        const generateOrganicShape = () => {
+            const r = () => 30 + Math.random() * 40; 
+            return `${r()}% ${r()}% ${r()}% ${r()}% / ${r()}% ${r()}% ${r()}% ${r()}%`;
+        };
+
+        const generateInsight = async (text) => {
+            return new Promise(resolve => {
+                const randomInsight = INSIGHT_POOL[Math.floor(Math.random() * INSIGHT_POOL.length)];
+                setTimeout(() => resolve(randomInsight), 2000);
+            });
+        };
+
+        // ==========================================
+        // 2. 基础组件 Stone (视觉核心重构)
+        // ==========================================
+        const Stone = ({ shape, size = 'md', isMossy = false, className = '', onClick, children }) => {
+            const sizeClasses = {
+                sm: 'w-16 h-16',
+                md: 'w-32 h-32',
+                lg: 'w-80 h-80' 
+            };
+            
+            // 3D 拟态阴影 - 增强厚度感
+            const thickShadowStyle = `
+                inset 2px 2px 10px rgba(255,255,255, 0.8), 
+                inset -3px -3px 15px rgba(0,0,0, 0.25), 
+                0px 5px 5px rgba(0,0,0, 0.15), 
+                0px 12px 20px rgba(0,0,0, 0.1), 
+                0px 25px 40px rgba(0,0,0, 0.1)
+            `;
+
+            return (
+                <div 
+                    onClick={onClick}
+                    className={`relative bg-[#d4d4d4] overflow-hidden cursor-pointer transition-all duration-500 ease-out ${sizeClasses[size]} ${className}`}
+                    style={{ 
+                        borderRadius: shape,
+                        boxShadow: thickShadowStyle,
+                        transform: 'translateZ(0) perspective(500px) rotateX(2deg)', // 微微的倾斜增强立体感
+                        backfaceVisibility: 'hidden'
+                    }}
+                >
+                    {/* 石头本身的纹理（底层） */}
+                    <div className="absolute inset-0 opacity-20 pointer-events-none z-0" 
+                         style={{
+                             backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`
+                         }}
+                    ></div>
+
+                    {/* 苔藓层重构：双层叠加 + 混合模式 = 绒面感 */}
+                    {isMossy && (
+                        <>
+                            {/* Layer 1: 苔藓基底 (深色，模拟湿润的根部) - Multiply */}
+                            <div className="absolute inset-0 z-10 opacity-70 mix-blend-multiply transition-opacity duration-1000"
+                                 style={{
+                                    backgroundColor: '#4A5D23',
+                                    // 使用我们定义的粗糙滤镜，让边缘不那么整齐
+                                    filter: 'url(#mossRoughness) contrast(1.2)',
+                                    transform: 'scale(1.02)' // 微微放大，让边缘看起来包裹住石头
+                                 }}
+                            ></div>
+
+                            {/* Layer 2: 苔藓绒毛 (亮色，模拟光照下的细毛) - Soft Light/Overlay */}
+                            <div className="absolute inset-0 z-10 opacity-60 mix-blend-overlay transition-opacity duration-1000"
+                                 style={{
+                                     backgroundColor: '#8A9A5B',
+                                     // 使用高频噪声滤镜，模拟细腻质感
+                                     backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='fuzz'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='3' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23fuzz)' opacity='0.5'/%3E%3C/svg%3E")`,
+                                     boxShadow: 'inset 5px 5px 20px rgba(255,255,255,0.3)' // 给苔藓层也加个高光，让它看起来是球面的
+                                 }}
+                            ></div>
+                            
+                            {/* Layer 3: 苔藓的环境光遮蔽 (Vignette) - 让边缘暗下去，增加体积感 */}
+                             <div className="absolute inset-0 z-10 pointer-events-none opacity-40 mix-blend-multiply"
+                                 style={{
+                                     background: 'radial-gradient(circle at 30% 30%, transparent 40%, #1a260e 100%)'
+                                 }}
+                            ></div>
+                        </>
+                    )}
+
+                    <div className="relative z-20 w-full h-full">
+                        {children}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // 3. 核心页面组件
+        // ==========================================
+
+        // --- Courtyard (庭院) ---
+        const Courtyard = ({ stones, onStart }) => {
+            const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+            const [selectedStone, setSelectedStone] = useState(null);
+
+            const containerVariants = {
+                hidden: { opacity: 0 },
+                visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
+            };
+
+            const itemVariants = {
+                hidden: { y: 20, opacity: 0 },
+                visible: { y: 0, opacity: 1 }
+            };
+
+            const weatherOptions = [
+                { type: Weather.SUN, icon: Icons.Sun, label: "晴朗" },
+                { type: Weather.CLOUD, icon: Icons.Cloud, label: "多云" },
+                { type: Weather.RAIN, icon: Icons.CloudRain, label: "雨天" },
+                { type: Weather.STORM, icon: Icons.CloudLightning, label: "风暴" },
+            ];
+
+            const formatDate = (timestamp) => {
+                return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+            };
+
+            return (
+                <div className="min-h-screen w-full flex flex-col p-6 relative overflow-y-auto no-scrollbar">
+                <header className="mb-8 mt-4 text-center z-20 pointer-events-none flex-shrink-0">
+                    <h1 className="text-3xl font-serif font-bold text-ink opacity-80">苔与石</h1>
+                    <p className="text-xs text-ink/60 mt-2 tracking-[0.2em] uppercase">Moss & Stone</p>
+                </header>
+
+                <motion.div 
+                    variants={containerVariants}
+                    initial="hidden"
+                    animate="visible"
+                    className="flex-1 flex flex-wrap justify-center content-start gap-12 pb-64 pt-4 max-w-3xl mx-auto"
+                >
+                    {stones.map((stone) => (
+                    <motion.div 
+                        key={stone.id} 
+                        variants={itemVariants} 
+                        className="relative"
+                        style={{
+                            marginTop: `${stone.offsetY}px`,
+                            marginLeft: `${stone.offsetX}px`,
+                            marginRight: `${stone.offsetX * -0.5}px`,
+                            rotate: `${stone.rotation}deg`,
+                        }}
+                    >
+                        <Stone 
+                            shape={stone.shapePolygon} 
+                            isMossy 
+                            size="sm" 
+                            onClick={() => setSelectedStone(stone)}
+                            className="hover:scale-105 transition-transform duration-300"
+                        />
+                    </motion.div>
+                    ))}
+                </motion.div>
+
+                <div className="fixed bottom-0 left-0 right-0 top-0 pointer-events-none flex flex-col items-center justify-end z-10 pb-12">
+                    {!isSelectorOpen && !selectedStone && (
+                        <div className="pointer-events-auto flex flex-col items-center gap-6 bg-gradient-to-t from-concrete via-concrete to-transparent pt-32 w-full pb-8">
+                            <motion.button
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                whileHover={{ scale: 1.02, rotate: 2 }}
+                                whileTap={{ scale: 0.98 }}
+                                onClick={() => setIsSelectorOpen(true)}
+                                className="w-48 h-32 border-4 border-dashed border-ink/20 rounded-[40%_60%_50%_50%/50%_40%_60%_50%] flex items-center justify-center hover:border-ink/40 transition-colors bg-concrete/50 shadow-sm backdrop-blur-sm"
+                            >
+                                <span className="text-2xl text-ink/20">+</span>
+                            </motion.button>
+                            <motion.p 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: 0.5 }}
+                                className="text-ink/60 font-serif tracking-widest text-sm mb-8"
+                            >
+                                把心事，放在这里。
+                            </motion.p>
+                        </div>
+                    )}
+                </div>
+
+                <AnimatePresence>
+                    {isSelectorOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-concrete/80 backdrop-blur-sm">
+                        <motion.div
+                            initial={{ y: 50, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            exit={{ y: 50, opacity: 0 }}
+                            className="bg-[#E8E8E8] p-8 rounded-3xl shadow-2xl w-80 max-w-sm border border-white/40"
+                        >
+                            <h3 className="text-center text-ink/70 mb-8 font-serif text-lg">此刻内心的天气？</h3>
+                            <div className="flex justify-between px-2 mb-4">
+                            {weatherOptions.map((option) => (
+                                <button
+                                key={option.type}
+                                onClick={() => onStart(option.type)}
+                                className="flex flex-col items-center gap-3 text-ink/40 hover:text-moss transition-colors group"
+                                >
+                                <div className="p-3 rounded-full bg-white/50 group-hover:bg-white transition-colors shadow-sm">
+                                    <option.icon size={24} />
+                                </div>
+                                <span className="text-xs font-serif">{option.label}</span>
+                                </button>
+                            ))}
+                            </div>
+                            <button 
+                                onClick={() => setIsSelectorOpen(false)}
+                                className="w-full mt-8 text-xs text-ink/30 tracking-widest hover:text-ink py-2"
+                            >
+                                取消
+                            </button>
+                        </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
+
+                <AnimatePresence>
+                    {selectedStone && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-concrete/80 backdrop-blur-sm" onClick={() => setSelectedStone(null)}>
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.95, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-[#F0F0F0] p-8 rounded-2xl shadow-2xl w-80 max-w-sm border border-white/40 relative text-center m-4"
+                        >
+                            <button 
+                                onClick={() => setSelectedStone(null)}
+                                className="absolute top-4 right-4 text-ink/30 hover:text-ink transition-colors"
+                            >
+                                <Icons.X size={20} /> 
+                            </button>
+                            
+                            <div className="mt-4 mb-8">
+                                <p className="text-xs text-ink/40 font-serif tracking-[0.2em] uppercase mb-4">
+                                    {formatDate(selectedStone.timestamp)}
+                                </p>
+                                <div className="w-8 h-1 bg-moss/20 mx-auto mb-8 rounded-full"></div>
+                                <p className="font-serif text-xl text-ink leading-loose">
+                                    “{selectedStone.insight}”
+                                </p>
+                            </div>
+                            
+                            <div className="pt-6 border-t border-ink/5">
+                                <p className="text-xs text-moss opacity-60 font-serif tracking-widest">
+                                    记忆已模糊，但智慧留存。
+                                </p>
+                            </div>
+                        </motion.div>
+                    </div>
+                    )}
+                </AnimatePresence>
+                </div>
+            );
+        };
+
+        // --- Etching (蚀刻) ---
+        const Etching = ({ stoneShape, onLayDown }) => {
+            const [text, setText] = useState('');
+            const [isCarving, setIsCarving] = useState(false);
+            const [carvedIndex, setCarvedIndex] = useState(0); 
+            const textareaRef = useRef(null);
+            const scrollRef = useRef(null);
+
+            useEffect(() => {
+                const timer = setTimeout(() => {
+                    if (textareaRef.current) textareaRef.current.focus();
+                }, 850);
+                return () => clearTimeout(timer);
+            }, []);
+
+            useEffect(() => {
+                if (isCarving && scrollRef.current) {
+                    const element = scrollRef.current;
+                    const isOverflowing = element.scrollHeight > element.clientHeight;
+                    if (isOverflowing) {
+                        element.scrollTop = element.scrollHeight;
+                    }
+                }
+            }, [carvedIndex, isCarving]);
+
+            useEffect(() => {
+                if (!isCarving) return;
+                
+                if (carvedIndex > text.length) {
+                    const finishTimer = setTimeout(() => {
+                        onLayDown(text);
+                    }, 500);
+                    return () => clearTimeout(finishTimer);
+                }
+
+                let delay = 50; 
+                if (carvedIndex < 5) delay = 300; 
+                else if (carvedIndex < 10) delay = 150; 
+                else delay = 40;  
+
+                const timer = setTimeout(() => {
+                    setCarvedIndex(prev => prev + 1);
+                }, delay);
+                return () => clearTimeout(timer);
+            }, [isCarving, carvedIndex, text, onLayDown]);
+
+            const handleSubmit = () => {
+                if (text.trim().length === 0) return;
+                if (textareaRef.current) textareaRef.current.blur();
+                setTimeout(() => {
+                    setIsCarving(true); 
+                    setCarvedIndex(0); 
+                }, 50); 
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                }
+            };
+
+            return (
+                <div className="min-h-screen w-full flex flex-col items-center justify-center p-6 pb-20"> 
+                    <motion.div
+                        initial={{ scale: 0.9, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.8, ease: "easeOut" }}
+                        className="relative"
+                    >
+                        <Stone shape={stoneShape} size="lg" className="overflow-hidden relative">
+                            
+                            <div className="w-full h-full flex items-center justify-center relative z-20">
+
+                                {!isCarving && (
+                                    <textarea
+                                        ref={textareaRef}
+                                        value={text}
+                                        onChange={(e) => setText(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        placeholder="刚才发生了什么？"
+                                        maxLength={140}
+                                        spellCheck={false}
+                                        autoComplete="off"
+                                        style={{
+                                            textShadow: '0px 1px 0px rgba(255,255,255,0.5)',
+                                            caretColor: '#2C2C2C',
+                                            outline: 'none', border: 'none', boxShadow: 'none', resize: 'none'
+                                        }}
+                                        className="no-scrollbar appearance-none border-0 shadow-none w-[75%] h-[55%] py-4 bg-transparent text-center text-[#333] font-serif text-lg leading-relaxed placeholder:text-ink/30 placeholder:italic placeholder:shadow-none overflow-y-auto focus:ring-0"
+                                    />
+                                )}
+
+                                {isCarving && (
+                                    <div 
+                                        ref={scrollRef}
+                                        style={{ 
+                                            transform: 'translateZ(0)',
+                                            maskImage: 'linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%)',
+                                            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%)'
+                                        }}
+                                        className="no-scrollbar w-[80%] h-[60%] py-6 text-center font-serif text-lg leading-relaxed break-words whitespace-pre-wrap flex flex-wrap justify-center content-start overflow-y-auto scroll-smooth"
+                                    >
+                                        {text.split('').map((char, index) => (
+                                            <span 
+                                                key={index}
+                                                className={index < carvedIndex ? "carved-deep" : "opacity-0"}
+                                                style={{ transition: 'opacity 0.1s' }}
+                                            >
+                                                {char}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+
+                            </div>
+                        </Stone>
+                        
+                        {/* 按钮绝对定位 */}
+                        <div className="absolute top-full left-0 w-full flex flex-col items-center pt-12">
+                            <motion.button
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: text.length > 0 && !isCarving ? 1 : 0 }}
+                                disabled={text.length === 0 || isCarving}
+                                onClick={handleSubmit}
+                                className="px-8 py-3 bg-transparent border border-ink/20 rounded-full text-ink/60 tracking-widest text-sm font-serif hover:bg-ink/5 transition-all disabled:opacity-0 focus:outline-none focus:ring-0 whitespace-nowrap"
+                            >
+                                {isCarving ? "刻录中..." : "刻好了，放下吧"}
+                            </motion.button>
+                            
+                            {!isCarving && (
+                                <div className="mt-4 text-ink/20 text-xs italic font-serif">
+                                    {text.length}/140
+                                </div>
+                            )}
+                        </div>
+
+                    </motion.div>
+                </div>
+            );
+        };
+
+        // --- Overgrowth (生长) ---
+        const Overgrowth = ({ worry, stoneShape, onGrowthComplete }) => {
+            useEffect(() => {
+                const timer = setTimeout(() => {
+                    onGrowthComplete();
+                }, 5000); 
+                return () => clearTimeout(timer);
+            }, [onGrowthComplete]);
+
+            return (
+                <div className="min-h-screen w-full flex flex-col items-center justify-center p-6 pb-20"> 
+                    <motion.div className="relative">
+                        <Stone shape={stoneShape} size="lg" className="overflow-hidden relative">
+                            
+                            <div className="w-full h-full flex items-center justify-center relative z-0">
+                                <motion.div
+                                    initial={{ opacity: 0.8 }}
+                                    animate={{ opacity: 0 }}
+                                    transition={{ duration: 2, delay: 1 }}
+                                    style={{ 
+                                        transform: 'translateZ(0)',
+                                        maskImage: 'linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%)',
+                                        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%)'
+                                    }}
+                                    className="no-scrollbar w-[80%] h-[60%] py-6 text-center font-serif text-lg leading-relaxed break-words whitespace-pre-wrap flex flex-wrap justify-center content-start overflow-hidden pointer-events-none"
+                                >
+                                    <span className="carved-deep w-full">{worry}</span>
+                                </motion.div>
+                            </div>
+
+                            {/* 生长动画：先铺底层深绿，再铺顶层嫩绿 */}
+                            <motion.div
+                                initial={{ opacity: 0, scale: 1.1 }} 
+                                animate={{ opacity: 0.7, scale: 1 }}
+                                transition={{ duration: 4, ease: "easeOut", delay: 0.5 }}
+                                className="absolute inset-0 z-30 mix-blend-multiply"
+                                style={{
+                                    borderRadius: stoneShape,
+                                    backgroundColor: '#4A5D23',
+                                    filter: 'url(#mossRoughness)'
+                                }}
+                            />
+                            
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 0.6 }}
+                                transition={{ duration: 3, delay: 1.8 }}
+                                className="absolute inset-0 z-40 mix-blend-overlay"
+                                style={{ 
+                                    borderRadius: stoneShape,
+                                    backgroundColor: '#8A9A5B',
+                                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='fuzz'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='3' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23fuzz)' opacity='0.5'/%3E%3C/svg%3E")`
+                                }}
+                            />
+                        </Stone>
+                        
+                        {/* 状态文字绝对定位 */}
+                        <div className="absolute top-full left-0 w-full flex justify-center pt-12">
+                            <motion.p 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: [0, 1, 0] }}
+                                transition={{ duration: 4, times: [0, 0.5, 1] }}
+                                className="text-moss text-sm font-serif whitespace-nowrap"
+                            >
+                                正在回归大地...
+                            </motion.p>
+                        </div>
+                        
+                    </motion.div>
+                </div>
+            );
+        };
+
+        // --- Echo (回响) ---
+        const Echo = ({ insight, stoneShape, onReturn }) => {
+            const randomID = useMemo(() => 
+                Math.random().toString(36).substring(2, 8).toUpperCase(), 
+            []);
+
+            const currentDate = useMemo(() => {
+                const d = new Date();
+                return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear().toString().substr(-2)} ${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`;
+            }, []);
+
+            return (
+                <div className="min-h-screen w-full flex flex-col items-center justify-center p-6 bg-black/5 overflow-hidden relative">
+                    <motion.div
+                        initial={{ scale: 1.5, y: 0, opacity: 1 }}
+                        animate={{ scale: 0.6, y: -120, opacity: 0.8 }} 
+                        transition={{ duration: 1.5, type: "spring", bounce: 0.2 }}
+                        className="absolute pointer-events-none grayscale opacity-10 z-0"
+                    >
+                        <Stone shape={stoneShape} isMossy size="md" />
+                    </motion.div>
+
+                    <motion.div
+                        drag
+                        dragConstraints={{ left: -100, right: 100, top: -100, bottom: 100 }}
+                        whileDrag={{ scale: 1.05, rotate: 0 }}
+                        dragElastic={0.1}
+                        initial={{ opacity: 0, y: 20, rotate: -5 }} 
+                        animate={{ opacity: 1, y: 20, rotate: 1 }}
+                        transition={{ delay: 0.5, duration: 0.8, type: "spring" }}
+                        className="relative z-20 bg-[#Fdfdfd] text-ink w-64 max-w-sm drop-shadow-jagged cursor-grab active:cursor-grabbing"
+                        style={{ transformOrigin: "center center" }}
+                    >
+                        {/* 顶部锯齿 */}
+                        <div className="absolute top-[-8px] left-0 w-full h-[8px] jagged-top"></div>
+                        
+                        {/* 底部锯齿 */}
+                        <div className="absolute bottom-[-8px] left-0 w-full h-[8px] jagged-bottom"></div>
+
+                        {/* 关闭按钮 */}
+                        <button 
+                            onClick={onReturn}
+                            className="absolute top-2 right-2 text-ink/40 hover:text-red-500 transition-colors z-30 p-2"
+                        >
+                            <Icons.X size={16} />
+                        </button>
+
+                        <div className="p-5 pb-6 font-sans">
+                            <div className="text-center mb-4">
+                                <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-ink/80">Pager Message</h3>
+                            </div>
+
+                            <div className="flex justify-between items-end text-[9px] text-ink/50 mb-2 font-bold tracking-wide">
+                                <span>ID: {randomID}</span>
+                                <span>{currentDate}</span>
+                            </div>
+
+                            <div className="w-full border-b-2 border-dashed border-ink/10 mb-4"></div>
+
+                            <div className="min-h-[100px] flex items-center justify-center">
+                                <p className="text-base font-bold leading-relaxed text-ink text-left w-full select-none">
+                                    {insight}
+                                </p>
+                            </div>
+
+                            <div className="h-4"></div>
+                            <div className="w-full border-b-2 border-dashed border-ink/10 mb-3"></div>
+
+                            <div className="flex justify-between items-center opacity-60">
+                                <div className="flex items-end gap-[2px] h-6 overflow-hidden">
+                                    {[...Array(15)].map((_, i) => (
+                                        <div 
+                                            key={i} 
+                                            className="bg-ink" 
+                                            style={{ width: Math.random() > 0.6 ? '1px' : '2px', height: '100%' }}
+                                        ></div>
+                                    ))}
+                                </div>
+                                <span className="text-[8px] tracking-widest uppercase font-bold">End of Transmission</span>
+                            </div>
+                        </div>
+                    </motion.div>
+
+                    <motion.p
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 2 }}
+                        className="absolute bottom-12 text-xs font-serif text-ink/40 tracking-widest pointer-events-none"
+                    >
+                        拖拽纸条 · 点击 × 收入口袋
+                    </motion.p>
+                </div>
+            );
+        };
+
+        // --- App ---
+        const App = () => {
+            const [screen, setScreen] = useState(ScreenState.COURTYARD);
+            const [stones, setStones] = useState([]);
+            const [currentShape, setCurrentShape] = useState(generateOrganicShape());
+            const [currentWorry, setCurrentWorry] = useState('');
+            const [currentWeather, setCurrentWeather] = useState(Weather.SUN);
+            const [currentInsight, setCurrentInsight] = useState('');
+
+            const handleStart = (weather) => {
+                setCurrentWeather(weather);
+                setCurrentShape(generateOrganicShape());
+                setScreen(ScreenState.ETCHING);
+            };
+
+            const handleLayDown = useCallback(async (text) => {
+                setCurrentWorry(text);
+                setScreen(ScreenState.OVERGROWTH);
+                try {
+                    const insight = await generateInsight(text);
+                    setCurrentInsight(insight);
+                } catch (e) {
+                    setCurrentInsight("风吹过青苔的声音。");
+                }
+            }, []);
+
+            const handleGrowthComplete = () => {
+                setScreen(ScreenState.ECHO);
+            };
+
+            const handleReturn = () => {
+                const newStone = {
+                    id: Date.now().toString(),
+                    worry: currentWorry,
+                    insight: currentInsight,
+                    timestamp: Date.now(),
+                    weather: currentWeather,
+                    shapePolygon: currentShape,
+                    rotation: Math.random() * 30 - 15,
+                    offsetY: Math.random() * 40,
+                    offsetX: Math.random() * 50 - 25
+                };
+                
+                setStones(prevStones => {
+                    const updatedStones = [...prevStones];
+                    if (updatedStones.length >= 9) {
+                        updatedStones.shift();
+                    }
+                    updatedStones.push(newStone);
+                    return updatedStones;
+                });
+                
+                setScreen(ScreenState.COURTYARD);
+                setCurrentWorry('');
+                setCurrentInsight('');
+            };
+
+            return (
+                <main className="w-full h-screen overflow-hidden bg-concrete text-ink font-sans selection:bg-moss selection:text-white relative">
+                    <AnimatePresence mode="wait">
+                        {screen === ScreenState.COURTYARD && (
+                            <motion.div key="courtyard" className="w-full h-full" exit={{ opacity: 0, transition: { duration: 0.5 } }}>
+                                <Courtyard stones={stones} onStart={handleStart} />
+                            </motion.div>
+                        )}
+
+                        {screen === ScreenState.ETCHING && (
+                            <motion.div key="etching" className="w-full h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.5 } }}>
+                                <Etching stoneShape={currentShape} onLayDown={handleLayDown} />
+                            </motion.div>
+                        )}
+
+                        {screen === ScreenState.OVERGROWTH && (
+                            <motion.div key="overgrowth" className="w-full h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.8 } }}>
+                                <Overgrowth worry={currentWorry} stoneShape={currentShape} onGrowthComplete={handleGrowthComplete} />
+                            </motion.div>
+                        )}
+
+                        {screen === ScreenState.ECHO && (
+                            <motion.div key="echo" className="w-full h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.5 } }}>
+                                <Echo insight={currentInsight} stoneShape={currentShape} onReturn={handleReturn} />
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </main>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
